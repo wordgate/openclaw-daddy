@@ -43,6 +43,35 @@ OpenclawDaddy.app
     └── Read/write ~/.openclaw-daddy/config.yaml + FSEvents file watching
 ```
 
+### SwiftTerm Integration
+
+SwiftTerm provides `TerminalView` (an `NSView` subclass). Integration with SwiftUI requires:
+
+**NSViewRepresentable bridge:**
+```swift
+struct SwiftTermView: NSViewRepresentable {
+    let ptyFd: Int32  // file descriptor from forkpty
+    func makeNSView(context:) -> TerminalView { ... }
+    func updateNSView(_:context:) { ... }
+}
+```
+
+**Multi-instance concerns:**
+- Each sidebar item (profile or free terminal) owns its own `TerminalView` instance + PTY fd
+- Only the selected tab's `TerminalView` is in the view hierarchy at a time (NavigationSplitView detail swaps)
+- Non-visible terminals: PTY continues running, SwiftTerm buffers output in memory. When user switches back, the scrollback is already populated — no re-render needed
+- Memory: each TerminalView with 10K line scrollback ≈ 2-5MB. 10 tabs ≈ 20-50MB — acceptable
+
+**Resize handling:**
+- SwiftTerm calls `TerminalViewDelegate.sizeChanged(source:newCols:newRows:)` on resize
+- Bridge must call `ioctl(ptyFd, TIOCSWINSZ, &winsize)` to propagate terminal size to the child process
+- This is critical — without it, `ncurses` apps, `vim`, `htop` etc. break in free terminals
+
+**Input handling:**
+- SwiftTerm captures keyboard input and writes to the PTY fd
+- For profile terminals: input is forwarded to the openclaw process (read-write, not read-only)
+- This allows users to interact with openclaw if it accepts stdin commands
+
 ---
 
 ## Configuration
@@ -82,6 +111,28 @@ profiles:
 **`restart_delay`** is a global-only setting; per-profile override is out of scope for v1.
 
 **Process launch:** `/bin/bash -l -c "{command}"` — login shell ensures user environment (nvm, etc.) is loaded.
+
+### Config Validation & Error Handling
+
+**On load (app start or FSEvents reload):**
+
+| Error | Behavior |
+|-------|----------|
+| File missing | Generate default config (see First Launch), show Settings |
+| YAML parse error | Show alert with line number, keep previous valid config in memory |
+| Missing required field (`name`, `command`) | Skip that profile, show warning badge on Settings icon |
+| `command` binary not found in PATH | Allow config to load, show ⚠️ in sidebar; fail at process start time with clear message in terminal: `"Error: 'openclaw' not found in PATH. Check profile path settings."` |
+| Duplicate profile names | Append suffix: `Gateway`, `Gateway (2)` |
+
+**Config schema version:**
+
+```yaml
+version: 1  # schema version, for future migration
+global:
+  ...
+```
+
+When `version` is missing, assume `1`. Future versions bump this and include a migration function in ConfigManager. App refuses to load configs with `version` higher than it supports, showing "Please update OpenclawDaddy."
 
 ---
 
@@ -321,6 +372,57 @@ profiles:
 - Log files are rotated by date: `gateway-2026-03-26.log`
 - No automatic cleanup for v1; user manages disk space manually
 - Default: logging disabled (no `log_file` key)
+
+---
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| ⌘T | New free terminal tab |
+| ⌘W | Close current tab (with confirmation if shell running) |
+| ⌘1-9 | Switch to sidebar item 1-9 |
+| ⌘⇧R | Restart selected profile process |
+| ⌘⇧S | Stop selected profile process |
+| ⌘⇧A | Start all profiles |
+| ⌘, | Open Settings |
+| ⌘N | Add new profile (opens Settings with new profile form) |
+
+These follow standard macOS conventions where possible (⌘T for new tab, ⌘W for close, ⌘, for settings).
+
+---
+
+## App State Restoration
+
+On quit + relaunch:
+
+- **Restored:** which sidebar item was selected, window size/position, free terminal tab count (but not their shell state — new shells are spawned)
+- **Not restored:** terminal scrollback content, in-flight shell sessions
+- Implementation: `@SceneStorage` for selection state, `NSWindow.setFrameAutosaveName` for window geometry
+- Profile processes are re-launched per `autostart` setting — state restoration doesn't override this
+
+---
+
+## Edge Cases
+
+**openclaw crashes immediately on start (exit within 1s):**
+- Keepalive still applies, but terminal shows: `"[Process exited with code N after <1s, restarting in 3s...]"`
+- After 10 consecutive sub-1s crashes, escalate: show macOS notification "Gateway is crash-looping" and change sidebar status to 🟡 (warning)
+- Process keeps restarting but user is made aware
+
+**App force-killed (SIGKILL / Activity Monitor):**
+- Child processes become orphans, adopted by PID 1
+- On next app launch: no cleanup needed — orphan openclaw processes run independently
+- Not ideal but acceptable; user can `killall openclaw` if needed
+- Future: write PID file per profile to `~/.openclaw-daddy/pids/`, check on startup
+
+**Disk full / config write failure:**
+- Settings UI shows save error inline: "Failed to save config: disk full"
+- Previous config remains on disk and in memory
+
+**Multiple app instances:**
+- Prevent via `NSRunningApplication` check on launch
+- If already running: activate existing instance, exit new one
 
 ---
 
