@@ -35,6 +35,52 @@ struct MainWindow: View {
         .onChange(of: selection) { _, newValue in
             savedSelection = newValue
         }
+        .onReceive(NotificationCenter.default.publisher(for: .newTerminalRequested)) { _ in
+            newTerminal()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .restartSelectedRequested)) { _ in
+            guard let sel = selection, sel.hasPrefix("profile-"),
+                  let profile = findProfile(from: sel) else { return }
+            let path = configManager.buildPath(for: profile, global: configManager.config.global)
+            processManager.restartProfile(profile, path: path)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .stopSelectedRequested)) { _ in
+            guard let sel = selection, sel.hasPrefix("profile-"),
+                  let profile = findProfile(from: sel) else { return }
+            processManager.stopProfile(profile.id)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .closeTabRequested)) { _ in
+            guard let sel = selection else { return }
+            if sel.hasPrefix("terminal-"), let termId = extractTerminalId(from: sel) {
+                if processManager.isTerminalRunning(termId) {
+                    let alert = NSAlert()
+                    alert.messageText = "Close Terminal?"
+                    alert.informativeText = "The shell is still running. Are you sure you want to close it?"
+                    alert.addButton(withTitle: "Close")
+                    alert.addButton(withTitle: "Cancel")
+                    alert.alertStyle = .warning
+                    if alert.runModal() == .alertFirstButtonReturn {
+                        processManager.closeTerminal(termId)
+                        terminalFds.removeValue(forKey: termId)
+                        terminalIds.removeAll { $0 == termId }
+                        selection = nil
+                    }
+                } else {
+                    processManager.closeTerminal(termId)
+                    terminalFds.removeValue(forKey: termId)
+                    terminalIds.removeAll { $0 == termId }
+                    selection = nil
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .switchToTab)) { notification in
+            guard let index = notification.userInfo?["index"] as? Int else { return }
+            let profiles = configManager.config.resolvedProfiles()
+            let allItems: [String] = profiles.map { "profile-\($0.id)" } + terminalIds.map { "terminal-\($0)" }
+            if index < allItems.count {
+                selection = allItems[index]
+            }
+        }
     }
 
     @ViewBuilder
