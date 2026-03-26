@@ -16,7 +16,7 @@ A native macOS .app wrapper for the `openclaw` command-line tool. The primary pu
 ## Tech Stack
 
 - **Swift + SwiftUI** — native macOS UI
-- **SwiftTerm** — terminal emulator component (SPM)
+- **SwiftTerm** v1.12+ — terminal emulator component (SPM)
 - **Yams** — YAML parsing (SPM)
 - **Minimum macOS:** 13 (Ventura)
 - **Sandbox:** disabled (required for child process permission inheritance)

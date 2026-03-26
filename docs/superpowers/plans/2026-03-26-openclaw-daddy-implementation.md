@@ -92,7 +92,7 @@ options:
 packages:
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
-    from: "1.2.0"
+    from: "1.12.0"
   Yams:
     url: https://github.com/jpsim/Yams
     from: "5.0.0"
@@ -110,9 +110,7 @@ targets:
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         INFOPLIST_FILE: OpenclawDaddy/Resources/Info.plist
-        CODE_SIGN_ENTITLEMENTS: OpenclawDaddy/Entitlements/OpenclawDaddy.entitlements
         SWIFT_VERSION: "5.9"
-        MACOSX_DEPLOYMENT_TARGET: "13.0"
         CODE_SIGN_STYLE: Automatic
     dependencies:
       - package: SwiftTerm
@@ -130,6 +128,7 @@ targets:
     settings:
       base:
         SWIFT_VERSION: "5.9"
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/OpenclawDaddy.app/Contents/MacOS/OpenclawDaddy
 ```
 
 - [ ] **Step 3: Create Info.plist**
@@ -1753,6 +1752,17 @@ struct TerminalView: NSViewRepresentable {
         func scrolled(source: SwiftTerm.TerminalView, position: Double) {}
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
         func requestOpenLink(source: TerminalView, link: String, params: [String : String]) {}
+        func bell(source: SwiftTerm.TerminalView) {
+            NSSound.beep()
+        }
+        func clipboardCopy(source: SwiftTerm.TerminalView, content: Data) {
+            if let str = String(data: content, encoding: .utf8) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(str, forType: .string)
+            }
+        }
+        func iTermContent(source: SwiftTerm.TerminalView, content: ArraySlice<UInt8>) {}
+        func rangeChanged(source: SwiftTerm.TerminalView, startY: Int, endY: Int) {}
     }
 
     func makeCoordinator() -> Coordinator {
@@ -1790,7 +1800,7 @@ struct TerminalView: NSViewRepresentable {
 Run: `xcodebuild -project OpenclawDaddy.xcodeproj -scheme OpenclawDaddy -destination 'platform=macOS' build 2>&1 | tail -5`
 Expected: `BUILD SUCCEEDED`
 
-Note: SwiftTerm API may require adjustments. The delegate methods and `configureNativeColors()` may have different signatures depending on the SwiftTerm version. Verify imports and adapt to the actual SwiftTerm API. Check `TerminalViewDelegate` protocol requirements in the resolved SPM package.
+Note: `TerminalViewDelegate` has 10 required methods (all implemented above). The `feed(byteArray:)` method is used to push PTY output data into the terminal view. If this exact method name doesn't compile, try `feed(buffer:)` or access the underlying `Terminal` instance via `terminalView.getTerminal().feed(byteArray:)`. SwiftTerm also provides `PseudoTerminalHelpers` for PTY operations — consider using it as an alternative to raw `forkpty` if integration issues arise.
 
 - [ ] **Step 3: Commit**
 
