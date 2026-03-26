@@ -49,7 +49,7 @@ OpenclawDaddy.app
 
 **Source of truth:** `~/.openclaw-daddy/config.yaml`
 
-The Settings UI is a visual editor for this file. Users can also edit the file directly — the app watches for changes via FSEvents and reloads automatically. Changes to running profiles require manual restart (no auto-restart to avoid unexpected interruption).
+The Settings UI is a visual editor for this file. Users can also edit the file directly — the app watches for changes via FSEvents (debounced with 500ms delay) and reloads automatically. Changes to running profiles require manual restart (no auto-restart to avoid unexpected interruption).
 
 ```yaml
 global:
@@ -78,6 +78,8 @@ profiles:
 ```
 
 **PATH construction:** system PATH + `global.extra_path` + `profile.path`
+
+**`restart_delay`** is a global-only setting; per-profile override is out of scope for v1.
 
 **Process launch:** `/bin/bash -l -c "{command}"` — login shell ensures user environment (nvm, etc.) is loaded.
 
@@ -131,9 +133,13 @@ profiles:
 └────────────────────────────────────────┘
 ```
 
-Detectable permissions (API-queryable): Screen Recording, Accessibility, Camera, Microphone, Location, Notifications — show actual status, offer "Request" button.
+**Detectable & requestable** (API triggers system prompt): Camera, Microphone, Location, Notifications — show actual status, offer "Request" button.
 
-Non-detectable permissions: Full Disk Access, Input Monitoring, Automation — show "Unknown", offer "Open Settings" link to relevant System Settings pane.
+**Detectable but not requestable** (can query status, but must direct user to System Settings): Screen Recording (`CGPreflightScreenCaptureAccess()`), Accessibility (`AXIsProcessTrusted()`) — show status, offer "Open Settings" button. `CGRequestScreenCaptureAccess()` opens System Settings directly.
+
+**Non-detectable** (no API to query status): Full Disk Access, Input Monitoring, Automation — show "Unknown", offer "Open Settings" link to relevant System Settings pane.
+
+Note: Notifications are requested via `UNUserNotificationCenter.current().requestAuthorization()` — no Info.plist key required on macOS.
 
 Status refreshes when app returns to foreground.
 
@@ -141,9 +147,9 @@ Status refreshes when app returns to foreground.
 
 ```
 ┌─ OpenclawDaddy ────────────┐
-│  Gateway          🟢 运行中 │
-│  Worker           🟢 运行中 │
-│  Monitor          ⚫ 已停止 │
+│  Gateway          🟢 Running │
+│  Worker           🟢 Running │
+│  Monitor          ⚫ Stopped │
 │  ─────────────────────────  │
 │  Start All                  │
 │  Stop All                   │
@@ -155,7 +161,7 @@ Status refreshes when app returns to foreground.
 └─────────────────────────────┘
 ```
 
-- Closing the main window does NOT quit the app — it continues in menu bar
+- Closing the main window does NOT quit the app — it continues in menu bar. Implemented via `AppDelegate.applicationShouldTerminateAfterLastWindowClosed` returning `false`. App remains Dock-visible (do NOT set `LSUIElement`).
 - Menu bar icon changes appearance when any process is crashed
 - Clicking a profile name opens the main window focused on that terminal
 - Quit via menu bar Quit or ⌘Q
@@ -176,12 +182,15 @@ Profile Process Start
   ├─ Bind SwiftTerm to PTY file descriptor
   ├─ Status → 🟢 Running
   │
-Process Monitoring (waitpid / SIGCHLD)
+Process Monitoring (DispatchSource.makeProcessSource + waitpid)
+  ├─ Note: Use raw posix_openpt/forkpty + execve, NOT Foundation Process
+  │   (Foundation Process cannot bind to a caller-supplied PTY fd)
+  │   Monitor via DispatchSource.makeProcessSource(identifier:pid, flags:.exit)
   ├─ Normal exit (exit 0) → ⚫ Stopped, no restart
   ├─ Abnormal exit (exit != 0 / signal)
   │   ├─ Status → 🔴 Crashed
-  │   ├─ Terminal shows: "[Process crashed, restarting in 3s...]"
-  │   ├─ Wait 3 seconds
+  │   ├─ Terminal shows: "[Process crashed, restarting in Ns...]"
+  │   ├─ Wait `restart_delay` seconds (from config, default 3s)
   │   └─ Restart → 🟢 Running
   └─ User manual Stop
       ├─ Send SIGTERM
@@ -224,7 +233,10 @@ openclaw-daddy/
 │   ├── Resources/
 │   │   └── Assets.xcassets
 │   └── Info.plist                      # Permission usage descriptions
-└── Package.swift                       # SPM dependencies (SwiftTerm, Yams)
+└── README.md
+# Note: SwiftTerm and Yams are added as Xcode Package Dependencies
+# (File > Add Package Dependencies) pointing at their GitHub URLs.
+# There is no top-level Package.swift — this is an .xcodeproj app, not an SPM package.
 ```
 
 ---
@@ -232,8 +244,7 @@ openclaw-daddy/
 ## Info.plist Permission Declarations
 
 ```xml
-<key>NSScreenCaptureUsageDescription</key>
-<string>OpenclawDaddy needs screen recording access for openclaw processes.</string>
+<!-- Camera and Microphone require usage description strings on macOS -->
 <key>NSCameraUsageDescription</key>
 <string>OpenclawDaddy needs camera access for openclaw processes.</string>
 <key>NSMicrophoneUsageDescription</key>
@@ -241,6 +252,8 @@ openclaw-daddy/
 <key>NSLocationUsageDescription</key>
 <string>OpenclawDaddy needs location access for openclaw processes.</string>
 ```
+
+**Note:** Screen Recording, Accessibility, Full Disk Access, and Input Monitoring do NOT use Info.plist usage description keys on macOS. They are managed entirely through System Settings. Screen Recording is triggered via `CGRequestScreenCaptureAccess()` which opens System Settings directly.
 
 ---
 
