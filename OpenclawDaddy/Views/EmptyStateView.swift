@@ -1,18 +1,16 @@
 import SwiftUI
 
 struct EmptyStateView: View {
-    let onOpenSettings: () -> Void
-
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "terminal")
                 .font(.system(size: 48))
                 .foregroundStyle(.secondary)
-            Text("No profiles configured")
+            Text("Welcome to OpenclawDaddy")
                 .font(.title2)
-            Text("Add one in Settings or edit ~/.openclaw-daddy/config.yaml")
+            Text("Select a profile, or click Add Profile to get started.")
                 .foregroundStyle(.secondary)
-            Button("Open Settings") { onOpenSettings() }
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

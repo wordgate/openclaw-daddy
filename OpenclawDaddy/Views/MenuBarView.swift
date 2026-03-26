@@ -2,48 +2,68 @@ import SwiftUI
 
 struct MenuBarView: View {
     let profiles: [Profile]
-    let statusProvider: (UUID) -> ProcessStatus
+    let statusProvider: (String) -> ProcessStatus
+    let onStartProfile: (Profile) -> Void
+    let onStopProfile: (String) -> Void
     let onStartAll: () -> Void
     let onStopAll: () -> Void
     let onOpenWindow: () -> Void
-    let onOpenSettings: () -> Void
     let onQuit: () -> Void
 
     var body: some View {
-        ForEach(profiles) { profile in
-            HStack {
-                Circle().fill(statusColor(statusProvider(profile.id))).frame(width: 8, height: 8)
-                Text(profile.name)
-                Spacer()
-                Text(statusLabel(statusProvider(profile.id)))
-                    .foregroundStyle(.secondary).font(.caption)
+        if profiles.isEmpty {
+            Text("No profiles found")
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(profiles) { profile in
+                let status = statusProvider(profile.name)
+                Button {
+                    onOpenWindow()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        NotificationCenter.default.post(
+                            name: .selectProfile,
+                            object: nil,
+                            userInfo: ["profileName": profile.name]
+                        )
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: statusIcon(status))
+                            .foregroundStyle(statusColor(status))
+                        Text(profile.name)
+                        Spacer()
+                        Text(status.rawValue.capitalized)
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                    }
+                }
             }
         }
+
         Divider()
         Button("Start All") { onStartAll() }
         Button("Stop All") { onStopAll() }
         Divider()
         Button("Open Window") { onOpenWindow() }
-        Button("Settings...") { onOpenSettings() }
         Divider()
-        Button("Quit") { onQuit() }
+        Button("Quit OpenclawDaddy") { onQuit() }
     }
 
-    private func statusColor(_ status: ProcessStatus) -> Color {
-        switch status {
-        case .running: return .green
-        case .crashed: return .red
-        case .crashLooping: return .yellow
-        case .stopped: return .gray
+    private func statusIcon(_ s: ProcessStatus) -> String {
+        switch s {
+        case .running: return "circle.fill"
+        case .crashed: return "xmark.circle.fill"
+        case .crashLooping: return "exclamationmark.circle.fill"
+        case .stopped: return "circle"
         }
     }
 
-    private func statusLabel(_ status: ProcessStatus) -> String {
-        switch status {
-        case .running: return "Running"
-        case .crashed: return "Crashed"
-        case .crashLooping: return "Crash Loop"
-        case .stopped: return "Stopped"
+    private func statusColor(_ s: ProcessStatus) -> Color {
+        switch s {
+        case .running: return .green
+        case .crashed: return .red
+        case .crashLooping: return .orange
+        case .stopped: return .gray
         }
     }
 }

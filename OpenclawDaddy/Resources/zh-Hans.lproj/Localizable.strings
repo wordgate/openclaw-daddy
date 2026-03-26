@@ -1,0 +1,99 @@
+/* Sidebar */
+"Profiles" = "龙虾";
+"Terminals" = "终端";
+"Settings" = "设置";
+"Add Profile" = "添加龙虾";
+"New Terminal" = "新建终端";
+"General" = "通用";
+"Permissions" = "权限";
+
+/* Profile status */
+"Running" = "运行中";
+"Stopped" = "已停止";
+"Crashed" = "已崩溃";
+"Crash Loop" = "崩溃循环";
+
+/* Profile actions */
+"Start" = "启动";
+"Stop" = "停止";
+"Restart" = "重启";
+"Delete Profile..." = "删除龙虾...";
+"Copy Command" = "复制命令";
+
+/* Empty state */
+"Welcome to OpenclawDaddy" = "欢迎来钓钓虾，加油！";
+"Select a profile, or click Add Profile to get started." = "选择一个龙虾，或点击「添加龙虾」开始。";
+
+/* Process stopped view */
+"Not running." = "未运行。";
+"Process crashed." = "进程已崩溃。";
+"Crash-looping. Check openclaw config." = "崩溃循环，请检查 openclaw 配置。";
+
+/* Add profile sheet */
+"Add Profile Title" = "添加龙虾";
+"Enter a name for the new openclaw profile." = "输入新的龙虾名称。";
+"Profile name (e.g. gateway)" = "龙虾名称（如 gateway）";
+"Profile already exists." = "龙虾「%@」已存在。";
+"Create" = "创建";
+"Cancel" = "取消";
+
+/* Settings - General */
+"openclaw" = "openclaw";
+"Path to openclaw" = "openclaw 路径";
+"Detect" = "检测";
+"Found" = "已找到";
+"Not found at this path" = "路径不存在";
+"Install openclaw" = "安装 openclaw";
+"Update available" = "openclaw 可更新至 v%@";
+"Check for Updates" = "检查 openclaw 更新";
+"Checking for updates..." = "正在检查 openclaw 更新...";
+"Update" = "更新 openclaw";
+"Startup" = "启动";
+"Launch at Login" = "开机自启动";
+"Keepalive" = "保活";
+"Restart delay: %ds" = "重启延迟：%d秒";
+"Unsaved" = "未保存";
+"Revert" = "还原";
+"Save" = "保存";
+
+/* Settings - Permissions */
+"Request" = "请求";
+"Open Settings" = "打开设置";
+"Open System Settings" = "打开系统设置";
+"Refresh" = "刷新";
+"Granted" = "已授权";
+"Denied" = "已拒绝";
+"Not Asked" = "未请求";
+"Unknown" = "未知";
+
+/* Terminal */
+"Close" = "关闭";
+"Close Terminal?" = "关闭终端？";
+"The shell is still running." = "Shell 仍在运行中。";
+"Shell" = "Shell";
+"Installing openclaw" = "正在安装 openclaw";
+"Updating openclaw" = "正在更新 openclaw";
+"Setup:" = "龙虾: %@";
+
+/* Menu bar */
+"Start All" = "全部启动";
+"Stop All" = "全部停止";
+"Open Window" = "打开窗口";
+"Quit OpenclawDaddy" = "退出钓钓虾";
+"No profiles found" = "未找到龙虾";
+
+/* Delete confirmation */
+"Delete profile?" = "删除龙虾「%@」？";
+"Delete profile message" = "将停止龙虾并删除 ~/.openclaw-%@/，此操作不可撤销。";
+"Delete" = "删除";
+
+/* Footer */
+"kaitu_promo" = "开途加速器 kaitu.io";
+
+/* Menu commands */
+"New Terminal Menu" = "新建终端";
+"New Profile Menu" = "新建龙虾";
+"Close Tab" = "关闭标签";
+"Restart Selected" = "重启所选";
+"Stop Selected" = "停止所选";
+"Start All Menu" = "全部启动";

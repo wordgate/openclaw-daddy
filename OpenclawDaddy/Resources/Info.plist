@@ -6,6 +6,8 @@
     <string>OpenclawDaddy</string>
     <key>CFBundleDisplayName</key>
     <string>OpenclawDaddy</string>
+    <key>LSHasLocalizedDisplayName</key>
+    <true/>
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleVersion</key>
@@ -19,12 +21,24 @@
     <key>LSMinimumSystemVersion</key>
     <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
     <key>NSCameraUsageDescription</key>
-    <string>OpenclawDaddy needs camera access for openclaw processes.</string>
+    <string>OpenclawDaddy delegates camera access to openclaw processes for AI assistant features.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>OpenclawDaddy needs microphone access for openclaw processes.</string>
+    <string>OpenclawDaddy delegates microphone access to openclaw processes for voice and audio features.</string>
     <key>NSLocationUsageDescription</key>
-    <string>OpenclawDaddy needs location access for openclaw processes.</string>
+    <string>OpenclawDaddy delegates location access to openclaw processes for location-aware features.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>OpenclawDaddy delegates screen recording to openclaw processes for browser control and screen capture.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>OpenclawDaddy uses Apple Events to control system features on behalf of openclaw.</string>
+    <key>SUPublicEDKey</key>
+    <string>IdmC3meZmgSeT8GZMNVGhZGMsTUv9ZLMQ6T1Q0I0UCk=</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/wordgate/openclaw-daddy/releases/latest/download/appcast.xml</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <true/>
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright 2026 Wordgate. All rights reserved.</string>
+    <string>Copyright © 2026 ALL NATION CONNECT TECHNOLOGY PTE. LTD. MIT License.</string>
 </dict>
 </plist>

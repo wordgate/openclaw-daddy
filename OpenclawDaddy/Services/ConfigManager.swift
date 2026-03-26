@@ -2,33 +2,25 @@ import Foundation
 import Yams
 
 enum ConfigError: LocalizedError {
-    case unsupportedVersion(Int)
     case parseError(String)
     case saveFailed(String)
 
     var errorDescription: String? {
         switch self {
-        case .unsupportedVersion(let v):
-            return "Config version \(v) is not supported. Please update OpenclawDaddy."
-        case .parseError(let msg):
-            return "Failed to parse config: \(msg)"
-        case .saveFailed(let msg):
-            return "Failed to save config: \(msg)"
+        case .parseError(let msg): return "Failed to parse config: \(msg)"
+        case .saveFailed(let msg): return "Failed to save config: \(msg)"
         }
     }
 }
 
-@Observable
-final class ConfigManager {
+final class ConfigManager: ObservableObject {
     private let configDirectory: URL
     private var configURL: URL { configDirectory.appendingPathComponent("config.yaml") }
     private var fileWatchSource: DispatchSourceFileSystemObject?
     private var debounceWorkItem: DispatchWorkItem?
 
-    private(set) var config: AppConfig = .makeDefault()
-    private(set) var validationWarnings: [String] = []
-
-    var onConfigReloaded: ((AppConfig) -> Void)?
+    @Published var config: AppConfig = .makeDefault()
+    @Published var profiles: [Profile] = []
 
     init(configDirectory: URL? = nil) {
         if let dir = configDirectory {
@@ -39,6 +31,8 @@ final class ConfigManager {
         }
     }
 
+    // MARK: - Config File
+
     @discardableResult
     func load() throws -> AppConfig {
         let fm = FileManager.default
@@ -47,24 +41,21 @@ final class ConfigManager {
         }
         if !fm.fileExists(atPath: configURL.path) {
             let defaultConfig = AppConfig.makeDefault()
+            // Auto-detect openclaw before saving default
+            if let detected = detectOpenclawPath() {
+                var cfg = defaultConfig
+                cfg.openclawPath = detected
+                try save(cfg)
+                return cfg
+            }
             try save(defaultConfig)
-            self.config = defaultConfig
             return defaultConfig
         }
 
         let yamlString = try String(contentsOf: configURL, encoding: .utf8)
-
-        if let rawDict = try Yams.load(yaml: yamlString) as? [String: Any],
-           let version = rawDict["version"] as? Int,
-           version > AppConfig.supportedVersion {
-            throw ConfigError.unsupportedVersion(version)
-        }
-
-        var warnings: [String] = []
-        let config = try decodeLenient(yamlString: yamlString, warnings: &warnings)
-        self.validationWarnings = warnings
-        self.config = config
-        return config
+        let decoded = try YAMLDecoder().decode(AppConfig.self, from: yamlString)
+        self.config = decoded
+        return decoded
     }
 
     func save(_ config: AppConfig) throws {
@@ -78,13 +69,90 @@ final class ConfigManager {
         }
     }
 
-    func buildPath(for profile: Profile, global: GlobalConfig) -> String {
-        let systemPath = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
-        let components = systemPath.split(separator: ":").map(String.init)
-            + global.extraPath
-            + profile.path
-        return components.joined(separator: ":")
+    // MARK: - Profile Discovery
+
+    /// Scan ~/.openclaw-* directories to discover profiles
+    func scanProfiles() {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(atPath: home.path) else {
+            profiles = []
+            return
+        }
+        profiles = contents
+            .filter { $0.hasPrefix(".openclaw-") && $0 != ".openclaw-daddy" && $0 != ".openclaw-dev" }
+            .map { String($0.dropFirst(".openclaw-".count)) }
+            .sorted()
+            .map { Profile(name: $0) }
     }
+
+    /// Create a new profile via `openclaw --profile <name> setup --non-interactive`
+    func createProfile(name: String, in pty: PTYProcess? = nil) throws -> PTYProcess {
+        let env = ProcessInfo.processInfo.environment
+        return try PTYManager.spawnShell(
+            shellCommand: "\(config.openclawPath) --profile \(name) setup --non-interactive",
+            environment: env
+        )
+    }
+
+    // MARK: - openclaw Detection
+
+    func detectOpenclawPath() -> String? {
+        let knownPaths = [
+            "/opt/homebrew/bin/openclaw",
+            "/usr/local/bin/openclaw",
+            "/usr/bin/openclaw"
+        ]
+
+        for path in knownPaths {
+            if FileManager.default.isExecutableFile(atPath: path) {
+                return path
+            }
+        }
+
+        // Try `which openclaw`
+        let pipe = Pipe()
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        proc.arguments = ["openclaw"]
+        proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
+        try? proc.run()
+        proc.waitUntilExit()
+
+        if proc.terminationStatus == 0,
+           let data = try? pipe.fileHandleForReading.readDataToEndOfFile(),
+           let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !path.isEmpty {
+            return path
+        }
+
+        // Try common nvm/node paths
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let nodePaths = [
+            "\(home)/.nvm/versions/node",
+            "\(home)/.volta/bin"
+        ]
+        for base in nodePaths {
+            if let versions = try? FileManager.default.contentsOfDirectory(atPath: base) {
+                for version in versions.sorted().reversed() {
+                    let candidate = "\(base)/\(version)/bin/openclaw"
+                    if FileManager.default.isExecutableFile(atPath: candidate) {
+                        return candidate
+                    }
+                }
+            }
+        }
+
+        return nil
+    }
+
+    /// Check if the configured openclaw path is valid
+    var isOpenclawValid: Bool {
+        FileManager.default.isExecutableFile(atPath: config.openclawPath)
+    }
+
+    // MARK: - File Watching
 
     func startWatching() {
         let fd = open(configURL.path, O_EVTONLY)
@@ -106,48 +174,10 @@ final class ConfigManager {
     private func handleFileChange() {
         debounceWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            do {
-                let newConfig = try self.load()
-                self.onConfigReloaded?(newConfig)
-            } catch {
-                self.validationWarnings.append("Reload failed: \(error.localizedDescription)")
-            }
+            try? self?.load()
+            self?.scanProfiles()
         }
         debounceWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
-    }
-
-    private func decodeLenient(yamlString: String, warnings: inout [String]) throws -> AppConfig {
-        guard let rawDict = try Yams.load(yaml: yamlString) as? [String: Any] else {
-            throw ConfigError.parseError("Root is not a dictionary")
-        }
-        let version = rawDict["version"] as? Int ?? 1
-        var global = GlobalConfig()
-        if let globalDict = rawDict["global"] as? [String: Any] {
-            global.restartDelay = globalDict["restart_delay"] as? Int ?? 3
-            global.extraPath = globalDict["extra_path"] as? [String] ?? []
-        }
-        var profiles: [Profile] = []
-        if let profilesArray = rawDict["profiles"] as? [[String: Any]] {
-            for (index, dict) in profilesArray.enumerated() {
-                guard let name = dict["name"] as? String else {
-                    warnings.append("Profile at index \(index): missing 'name', skipped")
-                    continue
-                }
-                guard let command = dict["command"] as? String else {
-                    warnings.append("Profile '\(name)': missing 'command', skipped")
-                    continue
-                }
-                profiles.append(Profile(
-                    name: name, command: command,
-                    autostart: dict["autostart"] as? Bool ?? false,
-                    path: dict["path"] as? [String] ?? [],
-                    env: dict["env"] as? [String: String] ?? [:],
-                    logFile: dict["log_file"] as? String
-                ))
-            }
-        }
-        return AppConfig(version: version, global: global, profiles: profiles)
     }
 }

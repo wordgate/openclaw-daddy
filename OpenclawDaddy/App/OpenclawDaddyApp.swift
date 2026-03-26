@@ -8,35 +8,38 @@ extension Notification.Name {
     static let closeTabRequested = Notification.Name("closeTabRequested")
     static let addProfileRequested = Notification.Name("addProfileRequested")
     static let switchToTab = Notification.Name("switchToTab")
+    static let selectProfile = Notification.Name("selectProfile")
 }
 
 @main
 struct OpenclawDaddyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @State private var configManager = ConfigManager()
-    @State private var processManager = ProcessManager()
+    @StateObject private var configManager = ConfigManager()
+    @StateObject private var processManager = ProcessManager()
+    private let appUpdater = AppUpdater()
 
     var body: some Scene {
         WindowGroup {
             MainWindow(
                 configManager: configManager,
-                processManager: processManager
+                processManager: processManager,
+                onCheckAppUpdate: { appUpdater.checkForUpdates() }
             )
             .onAppear {
                 do {
                     let config = try configManager.load()
-                    processManager = ProcessManager(restartDelay: config.global.restartDelay)
+                    processManager.updateRestartDelay(config.restartDelay)
+                    configManager.scanProfiles()
                     configManager.startWatching()
-                    if config.profiles.isEmpty {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                        }
+                    // Start all profiles AFTER config is loaded with correct openclawPath
+                    for profile in configManager.profiles {
+                        processManager.startProfile(profile, openclawPath: configManager.config.openclawPath)
                     }
                 } catch {
                     print("Config load error: \(error)")
                 }
                 appDelegate.processManager = processManager
-                processManager.onCrashLoop = { _, name in
+                processManager.onCrashLoop = { name in
                     let content = UNMutableNotificationContent()
                     content.title = "OpenclawDaddy"
                     content.body = "\(name) is crash-looping"
@@ -44,6 +47,7 @@ struct OpenclawDaddyApp: App {
                     let request = UNNotificationRequest(identifier: "crash-loop-\(name)", content: content, trigger: nil)
                     UNUserNotificationCenter.current().add(request)
                 }
+                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
             }
         }
         .defaultSize(width: 1000, height: 600)
@@ -60,6 +64,12 @@ struct OpenclawDaddyApp: App {
                     NotificationCenter.default.post(name: .closeTabRequested, object: nil)
                 }.keyboardShortcut("w")
             }
+            CommandGroup(after: .appInfo) {
+                Button("Check for App Updates...") {
+                    appUpdater.checkForUpdates()
+                }
+                .disabled(!appUpdater.canCheckForUpdates)
+            }
             CommandGroup(after: .toolbar) {
                 Button("Restart Selected") {
                     NotificationCenter.default.post(name: .restartSelectedRequested, object: nil)
@@ -68,53 +78,32 @@ struct OpenclawDaddyApp: App {
                     NotificationCenter.default.post(name: .stopSelectedRequested, object: nil)
                 }.keyboardShortcut("s", modifiers: [.command, .shift])
                 Button("Start All") {
-                    for profile in configManager.config.resolvedProfiles() {
-                        let path = configManager.buildPath(for: profile, global: configManager.config.global)
-                        processManager.startProfile(profile, path: path)
+                    for profile in configManager.profiles {
+                        processManager.startProfile(profile, openclawPath: configManager.config.openclawPath)
                     }
                 }.keyboardShortcut("a", modifiers: [.command, .shift])
             }
-            CommandGroup(after: .toolbar) {
-                Divider()
-                ForEach(1..<10, id: \.self) { index in
-                    Button("Tab \(index)") {
-                        NotificationCenter.default.post(name: .switchToTab, object: nil, userInfo: ["index": index - 1])
-                    }.keyboardShortcut(KeyEquivalent(Character(String(index))), modifiers: .command)
-                }
-            }
         }
 
-        Settings {
-            SettingsView(configManager: configManager)
-        }
-
-        MenuBarExtra {
+        MenuBarExtra("OpenclawDaddy", image: "MenuBarIcon") {
             MenuBarView(
-                profiles: configManager.config.resolvedProfiles(),
+                profiles: configManager.profiles,
                 statusProvider: { processManager.status(for: $0) },
+                onStartProfile: { profile in
+                    processManager.startProfile(profile, openclawPath: configManager.config.openclawPath)
+                },
+                onStopProfile: { processManager.stopProfile($0) },
                 onStartAll: {
-                    for profile in configManager.config.resolvedProfiles() {
-                        let path = configManager.buildPath(for: profile, global: configManager.config.global)
-                        processManager.startProfile(profile, path: path)
+                    for profile in configManager.profiles {
+                        processManager.startProfile(profile, openclawPath: configManager.config.openclawPath)
                     }
                 },
                 onStopAll: { processManager.stopAll() },
                 onOpenWindow: { NSApp.activate(ignoringOtherApps: true) },
-                onOpenSettings: {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                },
                 onQuit: {
-                    processManager.stopAll {
-                        NSApp.terminate(nil)
-                    }
+                    processManager.stopAll { NSApp.terminate(nil) }
                 }
             )
-        } label: {
-            let hasIssue = configManager.config.resolvedProfiles().contains {
-                let s = processManager.status(for: $0.id)
-                return s == .crashed || s == .crashLooping
-            }
-            Image(systemName: hasIssue ? "terminal.fill" : "terminal")
         }
     }
 }

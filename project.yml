@@ -2,7 +2,7 @@ name: OpenclawDaddy
 options:
   bundleIdPrefix: com.wordgate
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "13.0"
   xcodeVersion: "15.0"
   createIntermediateGroups: true
 
@@ -13,6 +13,9 @@ packages:
   Yams:
     url: https://github.com/jpsim/Yams
     from: "5.0.0"
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.6.0"
 
 targets:
   OpenclawDaddy:
@@ -33,6 +36,7 @@ targets:
     dependencies:
       - package: SwiftTerm
       - package: Yams
+      - package: Sparkle
 
   OpenclawDaddyTests:
     type: bundle.unit-test

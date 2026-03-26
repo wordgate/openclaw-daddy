@@ -1,0 +1,217 @@
+name: Build, Sign & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  APP_NAME: OpenclawDaddy
+  SCHEME: OpenclawDaddy
+  SIGN_IDENTITY: "Developer ID Application: ALL NATION CONNECT TECHNOLOGY PTE. LTD. (NJT954Q3RH)"
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set version in project
+        env:
+          APP_VERSION: ${{ steps.version.outputs.VERSION }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" \
+            OpenclawDaddy/Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" \
+            OpenclawDaddy/Resources/Info.plist
+
+      - name: Build universal binary
+        run: |
+          xcodebuild -project "${APP_NAME}.xcodeproj" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -arch arm64 -arch x86_64 \
+            ONLY_ACTIVE_ARCH=NO \
+            build
+
+      - name: Locate app bundle
+        id: app
+        run: |
+          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "${APP_NAME}.app" -path "*/Release/*" | head -1)
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Verify universal binary
+        env:
+          APP_PATH: ${{ steps.app.outputs.APP_PATH }}
+        run: file "$APP_PATH/Contents/MacOS/$APP_NAME"
+
+      - name: Import signing certificate
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(uuidgen)
+
+          echo -n "$APPLE_CERTIFICATE_P12" | base64 --decode -o "$CERTIFICATE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERTIFICATE_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+      - name: Codesign app
+        env:
+          APP_PATH: ${{ steps.app.outputs.APP_PATH }}
+        run: |
+          codesign --force --deep \
+            --sign "$SIGN_IDENTITY" \
+            --options runtime \
+            "$APP_PATH"
+          codesign --verify --deep --strict "$APP_PATH"
+
+      - name: Notarize app
+        env:
+          APP_PATH: ${{ steps.app.outputs.APP_PATH }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          ZIP_PATH="$RUNNER_TEMP/${APP_NAME}.zip"
+          ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
+
+          xcrun notarytool submit "$ZIP_PATH" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+          xcrun stapler staple "$APP_PATH"
+
+      - name: Create DMG
+        env:
+          APP_PATH: ${{ steps.app.outputs.APP_PATH }}
+          APP_VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          DMG_PATH="$RUNNER_TEMP/${APP_NAME}_${APP_VERSION}_universal.dmg"
+          STAGING="$RUNNER_TEMP/dmg-staging"
+          mkdir -p "$STAGING"
+          cp -R "$APP_PATH" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+
+          hdiutil create -volname "$APP_NAME" \
+            -srcfolder "$STAGING" \
+            -ov -format UDZO \
+            "$DMG_PATH"
+
+          codesign --force --sign "$SIGN_IDENTITY" "$DMG_PATH"
+          echo "DMG_PATH=$DMG_PATH" >> "$GITHUB_ENV"
+
+      - name: Notarize DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcrun notarytool submit "$DMG_PATH" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$DMG_PATH"
+
+      - name: Create app zip for Sparkle update
+        env:
+          APP_PATH: ${{ steps.app.outputs.APP_PATH }}
+          APP_VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          ZIP_PATH="$RUNNER_TEMP/${APP_NAME}_${APP_VERSION}_universal.app.zip"
+          ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
+          echo "ZIP_PATH=$ZIP_PATH" >> "$GITHUB_ENV"
+
+      - name: Sign update with Sparkle EdDSA
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          APP_VERSION: ${{ steps.version.outputs.VERSION }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          SIGN_TOOL=$(find ~/Library/Developer/Xcode/DerivedData -name "sign_update" -path "*/artifacts/*" | head -1)
+          if [ -z "$SIGN_TOOL" ]; then
+            SIGN_TOOL=$(find . -name "sign_update" -path "*/artifacts/*" | head -1)
+          fi
+
+          SIGNATURE=$("$SIGN_TOOL" "$ZIP_PATH" --ed-key-file <(echo "$SPARKLE_PRIVATE_KEY") 2>&1)
+          echo "SPARKLE_SIGNATURE<<EOF" >> "$GITHUB_ENV"
+          echo "$SIGNATURE" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+
+          FILE_SIZE=$(stat -f%z "$ZIP_PATH")
+          echo "FILE_SIZE=$FILE_SIZE" >> "$GITHUB_ENV"
+
+      - name: Generate appcast.xml
+        env:
+          APP_VERSION: ${{ steps.version.outputs.VERSION }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/${APP_NAME}_${APP_VERSION}_universal.app.zip"
+          PUB_DATE=$(date -R)
+
+          # Parse edSignature and length from sign_update output
+          ED_SIGNATURE=$(echo "$SPARKLE_SIGNATURE" | grep -o 'sparkle:edSignature="[^"]*"' | cut -d'"' -f2)
+          LENGTH=$(echo "$SPARKLE_SIGNATURE" | grep -o 'length="[^"]*"' | cut -d'"' -f2)
+          if [ -z "$LENGTH" ]; then
+            LENGTH="$FILE_SIZE"
+          fi
+
+          cat > "$RUNNER_TEMP/appcast.xml" << XMLEOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <channel>
+              <title>OpenclawDaddy</title>
+              <link>https://github.com/${{ github.repository }}</link>
+              <item>
+                <title>Version ${APP_VERSION}</title>
+                <pubDate>${PUB_DATE}</pubDate>
+                <sparkle:version>${BUILD_NUMBER}</sparkle:version>
+                <sparkle:shortVersionString>${APP_VERSION}</sparkle:shortVersionString>
+                <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+                <enclosure url="${DOWNLOAD_URL}" sparkle:edSignature="${ED_SIGNATURE}" length="${LENGTH}" type="application/octet-stream"/>
+              </item>
+            </channel>
+          </rss>
+          XMLEOF
+
+          echo "APPCAST_PATH=$RUNNER_TEMP/appcast.xml" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "OpenclawDaddy v${{ steps.version.outputs.VERSION }}"
+          generate_release_notes: true
+          files: |
+            ${{ env.DMG_PATH }}
+            ${{ env.ZIP_PATH }}
+            ${{ env.APPCAST_PATH }}
+
+      - name: Cleanup keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" 2>/dev/null || true

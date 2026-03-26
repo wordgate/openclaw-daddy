@@ -14,10 +14,13 @@ private func wIfSignaled(_ status: Int32) -> Bool {
     return s != 0x7F && s != 0
 }
 
-@Observable
-final class ProcessManager {
+enum ProcessStatus: String {
+    case running, stopped, crashed, crashLooping
+}
+
+final class ProcessManager: ObservableObject {
     struct ManagedProcess {
-        let profileId: UUID
+        let name: String
         var pty: PTYProcess
         var status: ProcessStatus
         var processSource: DispatchSourceProcess?
@@ -26,60 +29,56 @@ final class ProcessManager {
         var isStoppedByUser: Bool = false
     }
 
-    private var processes: [UUID: ManagedProcess] = [:]
-    private let restartDelay: Int
+    // All access on main thread only
+    private var processes: [String: ManagedProcess] = [:]
+    private var restartDelay: Int
     private let queue = DispatchQueue(label: "com.wordgate.openclaw-daddy.process-manager")
+    private let logManager = LogManager()
 
-    private(set) var stateVersion: Int = 0
+    @Published private(set) var stateVersion: Int = 0
 
-    var onProcessRestarted: ((UUID) -> Void)?
-    var onCrashLoop: ((UUID, String) -> Void)?
+    var onCrashLoop: ((String) -> Void)?
 
     init(restartDelay: Int = 3) {
         self.restartDelay = restartDelay
+    }
+
+    func updateRestartDelay(_ delay: Int) {
+        restartDelay = delay
     }
 
     private func notifyStateChange() {
         stateVersion += 1
     }
 
-    func status(for profileId: UUID) -> ProcessStatus {
+    func status(for name: String) -> ProcessStatus {
         _ = stateVersion
-        return processes[profileId]?.status ?? .stopped
+        return processes[name]?.status ?? .stopped
     }
 
-    func masterFd(for profileId: UUID) -> Int32? {
+    func masterFd(for name: String) -> Int32? {
         _ = stateVersion
-        return processes[profileId]?.pty.masterFd
+        return processes[name]?.pty.masterFd
     }
 
-    var allProfileIds: [UUID] {
-        Array(processes.keys)
-    }
+    // MARK: - Profile Process Management
 
-    func startProfile(
-        _ profile: Profile,
-        path: String,
-        env: [String: String] = [:],
-        onStarted: (() -> Void)? = nil
-    ) {
+    func startProfile(_ profile: Profile, openclawPath: String) {
+        let name = profile.name
+        let command = profile.command(openclawPath: openclawPath)
+
         queue.async { [weak self] in
             guard let self else { return }
             do {
-                var environment = ProcessInfo.processInfo.environment
-                environment["PATH"] = path
-                for (key, value) in profile.env.merging(env, uniquingKeysWith: { _, new in new }) {
-                    environment[key] = value
-                }
-
+                let env = ProcessInfo.processInfo.environment
                 let pty = try PTYManager.spawnShell(
-                    shellCommand: profile.command,
-                    environment: environment,
+                    shellCommand: command,
+                    environment: env,
                     workingDirectory: FileManager.default.homeDirectoryForCurrentUser.path
                 )
 
                 var managed = ManagedProcess(
-                    profileId: profile.id,
+                    name: name,
                     pty: pty,
                     status: .running,
                     lastStartTime: Date()
@@ -91,20 +90,19 @@ final class ProcessManager {
                     queue: self.queue
                 )
                 source.setEventHandler { [weak self] in
-                    self?.handleProcessExit(profileId: profile.id, profile: profile, path: path)
+                    self?.handleProcessExit(name: name, openclawPath: openclawPath)
                 }
                 source.resume()
                 managed.processSource = source
 
                 DispatchQueue.main.async {
-                    self.processes[profile.id] = managed
+                    self.processes[name] = managed
                     self.notifyStateChange()
-                    onStarted?()
                 }
             } catch {
                 DispatchQueue.main.async {
-                    self.processes[profile.id] = ManagedProcess(
-                        profileId: profile.id,
+                    self.processes[name] = ManagedProcess(
+                        name: name,
                         pty: PTYProcess(pid: -1, masterFd: -1),
                         status: .crashed
                     )
@@ -114,71 +112,69 @@ final class ProcessManager {
         }
     }
 
-    func stopProfile(_ profileId: UUID, onStopped: (() -> Void)? = nil) {
-        queue.async { [weak self] in
-            guard let self else { return }
-            guard var managed = self.processes[profileId] else {
-                DispatchQueue.main.async { onStopped?() }
-                return
+    func stopProfile(_ name: String, onStopped: (() -> Void)? = nil) {
+        guard let managed = processes[name] else {
+            onStopped?()
+            return
+        }
+
+        processes[name]?.isStoppedByUser = true
+        processes[name]?.processSource?.cancel()
+        processes[name]?.processSource = nil
+        notifyStateChange()
+
+        let pid = managed.pty.pid
+        guard pid > 0 else {
+            processes[name]?.status = .stopped
+            notifyStateChange()
+            onStopped?()
+            return
+        }
+
+        kill(pid, SIGTERM)
+
+        queue.asyncAfter(deadline: .now() + 5) { [weak self] in
+            var status: Int32 = 0
+            let result = waitpid(pid, &status, WNOHANG)
+            if result == 0 {
+                kill(pid, SIGKILL)
+                waitpid(pid, &status, WNOHANG)
             }
-
-            managed.isStoppedByUser = true
-            self.processes[profileId]?.isStoppedByUser = true
-            managed.processSource?.cancel()
-            self.processes[profileId]?.processSource = nil
-
-            let pid = managed.pty.pid
-            if pid > 0 {
-                kill(pid, SIGTERM)
-
-                self.queue.asyncAfter(deadline: .now() + 5) { [weak self] in
-                    var status: Int32 = 0
-                    let result = waitpid(pid, &status, WNOHANG)
-                    if result == 0 {
-                        kill(pid, SIGKILL)
-                        waitpid(pid, &status, WNOHANG)
-                    }
-                    managed.pty.cleanup()
-                    DispatchQueue.main.async {
-                        self?.processes[profileId]?.status = .stopped
-                        self?.processes[profileId]?.isStoppedByUser = true
-                        self?.notifyStateChange()
-                        onStopped?()
-                    }
-                }
-            } else {
-                DispatchQueue.main.async {
-                    self.processes[profileId]?.status = .stopped
-                    self.notifyStateChange()
-                    onStopped?()
-                }
+            managed.pty.cleanup()
+            DispatchQueue.main.async {
+                self?.processes[name]?.status = .stopped
+                self?.notifyStateChange()
+                onStopped?()
             }
         }
     }
 
-    func restartProfile(_ profile: Profile, path: String) {
-        stopProfile(profile.id) { [weak self] in
-            self?.startProfile(profile, path: path)
+    func restartProfile(_ profile: Profile, openclawPath: String) {
+        stopProfile(profile.name) { [weak self] in
+            self?.startProfile(profile, openclawPath: openclawPath)
         }
     }
 
     func stopAll(onComplete: (() -> Void)? = nil) {
         let group = DispatchGroup()
-        for id in Array(processes.keys) {
+        for name in Array(processes.keys) {
             group.enter()
-            stopProfile(id) { group.leave() }
+            stopProfile(name) { group.leave() }
         }
-        group.notify(queue: .main) { onComplete?() }
+        group.notify(queue: .main) { [weak self] in
+            self?.logManager.stopAll()
+            onComplete?()
+        }
     }
 
-    // MARK: - Terminal Tabs (no keepalive)
+    // MARK: - Terminal Tabs
 
     func spawnTerminal() -> (UUID, Int32)? {
-        let id = UUID()
         do {
             let pty = try PTYManager.spawnInteractiveShell()
-            let managed = ManagedProcess(profileId: id, pty: pty, status: .running)
-            processes[id] = managed
+            let id = UUID()
+            let managed = ManagedProcess(name: "terminal-\(id)", pty: pty, status: .running)
+            processes["terminal-\(id)"] = managed
             return (id, pty.masterFd)
         } catch {
             return nil
@@ -186,15 +182,16 @@ final class ProcessManager {
     }
 
     func closeTerminal(_ id: UUID) {
-        guard let managed = processes[id] else { return }
+        let key = "terminal-\(id)"
+        guard let managed = processes[key] else { return }
         if managed.pty.pid > 0 { kill(managed.pty.pid, SIGTERM) }
         managed.pty.cleanup()
-        managed.processSource?.cancel()
-        processes.removeValue(forKey: id)
+        processes.removeValue(forKey: key)
     }
 
     func isTerminalRunning(_ id: UUID) -> Bool {
-        guard let managed = processes[id], managed.pty.pid > 0 else { return false }
+        let key = "terminal-\(id)"
+        guard let managed = processes[key], managed.pty.pid > 0 else { return false }
         var status: Int32 = 0
         let result = waitpid(managed.pty.pid, &status, WNOHANG)
         return result == 0
@@ -202,73 +199,79 @@ final class ProcessManager {
 
     // MARK: - Private
 
-    private func handleProcessExit(profileId: UUID, profile: Profile, path: String) {
-        guard var managed = processes[profileId] else { return }
-
-        var status: Int32 = 0
-        waitpid(managed.pty.pid, &status, 0)
-
-        let exitCode = wIfExited(status) ? Int(wExitStatus(status)) : -1
-        let wasSignaled = wIfSignaled(status)
-
-        if managed.isStoppedByUser { return }
-
-        if exitCode == 0 && !wasSignaled {
-            DispatchQueue.main.async { [weak self] in
-                self?.processes[profileId]?.status = .stopped
-                self?.notifyStateChange()
-            }
-            return
-        }
-
-        let elapsed = Date().timeIntervalSince(managed.lastStartTime)
-        if elapsed < 1.0 {
-            managed.consecutiveQuickCrashes += 1
-        } else {
-            managed.consecutiveQuickCrashes = 0
-        }
-
-        let isCrashLooping = managed.consecutiveQuickCrashes >= 10
-
+    private func handleProcessExit(name: String, openclawPath: String) {
         DispatchQueue.main.async { [weak self] in
-            self?.processes[profileId]?.status = isCrashLooping ? .crashLooping : .crashed
-            self?.processes[profileId]?.consecutiveQuickCrashes = managed.consecutiveQuickCrashes
-            if isCrashLooping { self?.onCrashLoop?(profileId, profile.name) }
-        }
-
-        let delay = self.restartDelay
-        queue.asyncAfter(deadline: .now() + .seconds(delay)) { [weak self] in
             guard let self else { return }
-            guard let current = self.processes[profileId], !current.isStoppedByUser else { return }
+            guard let managed = self.processes[name] else { return }
+            if managed.isStoppedByUser { return }
 
-            current.pty.cleanup()
-            current.processSource?.cancel()
+            var waitStatus: Int32 = 0
+            waitpid(managed.pty.pid, &waitStatus, WNOHANG)
 
-            do {
-                var environment = ProcessInfo.processInfo.environment
-                environment["PATH"] = path
-                for (key, value) in profile.env { environment[key] = value }
+            let exitCode = wIfExited(waitStatus) ? Int(wExitStatus(waitStatus)) : -1
+            let wasSignaled = wIfSignaled(waitStatus)
 
-                let newPty = try PTYManager.spawnShell(shellCommand: profile.command, environment: environment)
+            if exitCode == 0 && !wasSignaled {
+                self.processes[name]?.status = .stopped
+                self.notifyStateChange()
+                // Even normal exit → restart, because the purpose is keepalive
+            }
 
-                let source = DispatchSource.makeProcessSource(identifier: newPty.pid, eventMask: .exit, queue: self.queue)
-                source.setEventHandler { [weak self] in
-                    self?.handleProcessExit(profileId: profileId, profile: profile, path: path)
-                }
-                source.resume()
+            let elapsed = Date().timeIntervalSince(managed.lastStartTime)
+            let crashes = elapsed < 1.0 ? managed.consecutiveQuickCrashes + 1 : 0
+            let isCrashLooping = crashes >= 10
 
+            self.processes[name]?.status = isCrashLooping ? .crashLooping : .crashed
+            self.processes[name]?.consecutiveQuickCrashes = crashes
+            self.notifyStateChange()
+
+            if isCrashLooping {
+                self.onCrashLoop?(name)
+                return
+            }
+
+            // Restart after delay
+            let delay = self.restartDelay
+            self.queue.asyncAfter(deadline: .now() + .seconds(delay)) { [weak self] in
+                guard let self else { return }
                 DispatchQueue.main.async { [weak self] in
-                    self?.processes[profileId]?.pty = newPty
-                    self?.processes[profileId]?.status = .running
-                    self?.processes[profileId]?.processSource = source
-                    self?.processes[profileId]?.lastStartTime = Date()
-                    self?.notifyStateChange()
-                    self?.onProcessRestarted?(profileId)
-                }
-            } catch {
-                DispatchQueue.main.async { [weak self] in
-                    self?.processes[profileId]?.status = .crashed
-                    self?.notifyStateChange()
+                    guard let self else { return }
+                    guard let current = self.processes[name], !current.isStoppedByUser else { return }
+                    current.pty.cleanup()
+                    current.processSource?.cancel()
+
+                    let profile = Profile(name: name)
+                    self.queue.async { [weak self] in
+                        do {
+                            let env = ProcessInfo.processInfo.environment
+                            let newPty = try PTYManager.spawnShell(
+                                shellCommand: profile.command(openclawPath: openclawPath),
+                                environment: env
+                            )
+                            let source = DispatchSource.makeProcessSource(
+                                identifier: newPty.pid,
+                                eventMask: .exit,
+                                queue: self?.queue ?? .global()
+                            )
+                            source.setEventHandler { [weak self] in
+                                self?.handleProcessExit(name: name, openclawPath: openclawPath)
+                            }
+                            source.resume()
+
+                            DispatchQueue.main.async { [weak self] in
+                                self?.processes[name]?.pty = newPty
+                                self?.processes[name]?.status = .running
+                                self?.processes[name]?.processSource = source
+                                self?.processes[name]?.lastStartTime = Date()
+                                self?.notifyStateChange()
+                            }
+                        } catch {
+                            DispatchQueue.main.async { [weak self] in
+                                self?.processes[name]?.status = .crashed
+                                self?.notifyStateChange()
+                            }
+                        }
+                    }
                 }
             }
         }

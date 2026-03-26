@@ -20,9 +20,8 @@ struct PermissionInfo: Identifiable {
     let settingsURL: String?
 }
 
-@Observable
-final class PermissionManager {
-    var permissions: [PermissionInfo] = []
+final class PermissionManager: ObservableObject {
+    @Published var permissions: [PermissionInfo] = []
     private let locationManager = CLLocationManager()
 
     init() { refresh() }

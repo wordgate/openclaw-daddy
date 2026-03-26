@@ -1,0 +1,8 @@
+CFBundleDisplayName = "钓钓虾";
+CFBundleName = "钓钓虾";
+NSCameraUsageDescription = "钓钓虾需要摄像头权限以供 openclaw 进程使用。";
+NSMicrophoneUsageDescription = "钓钓虾需要麦克风权限以供 openclaw 进程使用。";
+NSLocationUsageDescription = "钓钓虾需要位置权限以供 openclaw 进程使用。";
+NSScreenCaptureUsageDescription = "钓钓虾需要录屏权限以供 openclaw 进程使用。";
+NSAppleEventsUsageDescription = "钓钓虾需要 Apple Events 权限以控制系统功能。";
+NSHumanReadableCopyright = "Copyright © 2026 ALL NATION CONNECT TECHNOLOGY PTE. LTD. MIT 协议。";

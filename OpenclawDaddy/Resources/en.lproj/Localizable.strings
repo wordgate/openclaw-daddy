@@ -1,0 +1,99 @@
+/* Sidebar */
+"Profiles" = "Profiles";
+"Terminals" = "Terminals";
+"Settings" = "Settings";
+"Add Profile" = "Add Profile";
+"New Terminal" = "New Terminal";
+"General" = "General";
+"Permissions" = "Permissions";
+
+/* Profile status */
+"Running" = "Running";
+"Stopped" = "Stopped";
+"Crashed" = "Crashed";
+"Crash Loop" = "Crash Loop";
+
+/* Profile actions */
+"Start" = "Start";
+"Stop" = "Stop";
+"Restart" = "Restart";
+"Delete Profile..." = "Delete Profile...";
+"Copy Command" = "Copy Command";
+
+/* Empty state */
+"Welcome to OpenclawDaddy" = "Welcome to OpenclawDaddy";
+"Select a profile, or click Add Profile to get started." = "Select a profile, or click Add Profile to get started.";
+
+/* Process stopped view */
+"Not running." = "Not running.";
+"Process crashed." = "Process crashed.";
+"Crash-looping. Check openclaw config." = "Crash-looping. Check openclaw config.";
+
+/* Add profile sheet */
+"Add Profile Title" = "Add Profile";
+"Enter a name for the new openclaw profile." = "Enter a name for the new openclaw profile.";
+"Profile name (e.g. gateway)" = "Profile name (e.g. gateway)";
+"Profile already exists." = "Profile \"%@\" already exists.";
+"Create" = "Create";
+"Cancel" = "Cancel";
+
+/* Settings - General */
+"openclaw" = "openclaw";
+"Path to openclaw" = "Path to openclaw";
+"Detect" = "Detect";
+"Found" = "Found";
+"Not found at this path" = "Not found at this path";
+"Install openclaw" = "Install openclaw";
+"Update available" = "openclaw update available: v%@";
+"Check for Updates" = "Check openclaw Updates";
+"Checking for updates..." = "Checking openclaw updates...";
+"Update" = "Update openclaw";
+"Startup" = "Startup";
+"Launch at Login" = "Launch at Login";
+"Keepalive" = "Keepalive";
+"Restart delay: %ds" = "Restart delay: %ds";
+"Unsaved" = "Unsaved";
+"Revert" = "Revert";
+"Save" = "Save";
+
+/* Settings - Permissions */
+"Request" = "Request";
+"Open Settings" = "Open Settings";
+"Open System Settings" = "Open System Settings";
+"Refresh" = "Refresh";
+"Granted" = "Granted";
+"Denied" = "Denied";
+"Not Asked" = "Not Asked";
+"Unknown" = "Unknown";
+
+/* Terminal */
+"Close" = "Close";
+"Close Terminal?" = "Close Terminal?";
+"The shell is still running." = "The shell is still running.";
+"Shell" = "Shell";
+"Installing openclaw" = "Installing openclaw";
+"Updating openclaw" = "Updating openclaw";
+"Setup:" = "Setup: %@";
+
+/* Menu bar */
+"Start All" = "Start All";
+"Stop All" = "Stop All";
+"Open Window" = "Open Window";
+"Quit OpenclawDaddy" = "Quit OpenclawDaddy";
+"No profiles found" = "No profiles found";
+
+/* Delete confirmation */
+"Delete profile?" = "Delete profile \"%@\"?";
+"Delete profile message" = "This will stop the process and remove ~/.openclaw-%@/. This cannot be undone.";
+"Delete" = "Delete";
+
+/* Footer */
+"kaitu_promo" = "开途加速器 kaitu.io";
+
+/* Menu commands */
+"New Terminal Menu" = "New Terminal";
+"New Profile Menu" = "New Profile";
+"Close Tab" = "Close Tab";
+"Restart Selected" = "Restart Selected";
+"Stop Selected" = "Stop Selected";
+"Start All Menu" = "Start All";
