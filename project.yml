@@ -2,7 +2,7 @@ name: OpenclawDaddy
 options:
   bundleIdPrefix: com.wordgate
   deploymentTarget:
-    macOS: "13.0"
+    macOS: "14.0"
   xcodeVersion: "15.0"
   createIntermediateGroups: true
 
