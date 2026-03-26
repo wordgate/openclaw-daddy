@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 extension Notification.Name {
     static let newTerminalRequested = Notification.Name("newTerminalRequested")
@@ -30,6 +31,14 @@ struct OpenclawDaddyApp: App {
                     print("Config load error: \(error)")
                 }
                 appDelegate.processManager = processManager
+                processManager.onCrashLoop = { _, name in
+                    let content = UNMutableNotificationContent()
+                    content.title = "OpenclawDaddy"
+                    content.body = "\(name) is crash-looping"
+                    content.sound = .default
+                    let request = UNNotificationRequest(identifier: "crash-loop-\(name)", content: content, trigger: nil)
+                    UNUserNotificationCenter.current().add(request)
+                }
             }
         }
         .defaultSize(width: 1000, height: 600)

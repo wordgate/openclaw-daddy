@@ -28,6 +28,7 @@ struct MainWindow: View {
             }
         }
         .frame(minWidth: 800, minHeight: 500)
+        .background(WindowAccessor())
         .onAppear {
             selection = savedSelection
             startAutoProfiles()
@@ -146,4 +147,13 @@ struct MainWindow: View {
         guard let uuidString = selectionId.components(separatedBy: "terminal-").last else { return nil }
         return UUID(uuidString: uuidString)
     }
+}
+
+struct WindowAccessor: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { view.window?.setFrameAutosaveName("MainWindow") }
+        return view
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
