@@ -43,12 +43,14 @@ struct TerminalView: NSViewRepresentable {
         // MARK: - TerminalViewDelegate (all 10 required methods)
 
         func sizeChanged(source: SwiftTerm.TerminalView, newCols: Int, newRows: Int) {
+            guard newCols > 0, newRows > 0, masterFd >= 0 else { return }
             PTYManager.resize(masterFd: masterFd, cols: UInt16(newCols), rows: UInt16(newRows))
         }
 
         func setTerminalTitle(source: SwiftTerm.TerminalView, title: String) {}
 
         func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {
+            guard masterFd >= 0 else { return }
             let bytes = Array(data)
             bytes.withUnsafeBufferPointer { ptr in
                 if let baseAddress = ptr.baseAddress {
