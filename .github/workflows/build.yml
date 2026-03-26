@@ -10,6 +10,9 @@ env:
   SCHEME: OpenclawDaddy
   SIGN_IDENTITY: "Developer ID Application: ALL NATION CONNECT TECHNOLOGY PTE. LTD. (NJT954Q3RH)"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-15
