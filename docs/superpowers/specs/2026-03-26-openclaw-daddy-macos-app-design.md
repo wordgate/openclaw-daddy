@@ -257,6 +257,103 @@ openclaw-daddy/
 
 ---
 
+## First Launch
+
+When `~/.openclaw-daddy/config.yaml` does not exist:
+
+1. App creates `~/.openclaw-daddy/` directory
+2. Writes a default config with one example profile (commented out):
+
+```yaml
+global:
+  restart_delay: 3
+  extra_path:
+    - /usr/local/bin
+    - /opt/homebrew/bin
+
+profiles: []
+  # - name: "Example"
+  #   command: "openclaw --profile example run"
+  #   autostart: true
+  #   path: []
+  #   env: {}
+```
+
+3. Opens the Settings window automatically so the user can add their first profile
+4. Sidebar shows an empty state with a prompt: "No profiles configured. Add one in Settings or edit ~/.openclaw-daddy/config.yaml"
+
+---
+
+## Permission Inheritance Verification
+
+The core assumption is that child processes forked from the .app inherit its TCC (Transparency, Consent, and Control) permissions. This needs verification:
+
+**Expected to work:**
+- Camera, Microphone, Location, Notifications — these are granted to the app bundle identifier, child processes inherit
+- Accessibility — granted to the app binary, child processes should inherit via parent PID
+
+**Needs runtime verification (macOS 14+):**
+- Screen Recording — Apple tightened this in Sonoma. If child processes do NOT inherit, fallback strategy:
+  1. Try `CGRequestScreenCaptureAccess()` from child process context
+  2. If that fails, the .app main process captures and passes to child via IPC
+  3. Document this as a known limitation if neither works
+
+**Implementation approach:**
+- Add a "Test Permissions" button in the Permissions panel that spawns a short-lived child process to verify each permission actually works from a subprocess context
+- Log results to help diagnose permission issues
+
+---
+
+## Logging
+
+**Terminal buffer:** SwiftTerm keeps an in-memory scrollback buffer (default ~10,000 lines). This is lost on app restart.
+
+**Persistent logs (optional, per-profile):**
+
+```yaml
+profiles:
+  - name: "Gateway"
+    command: "openclaw --profile gateway run"
+    log_file: "~/.openclaw-daddy/logs/gateway.log"  # optional, omit to disable
+```
+
+- When `log_file` is set, stdout/stderr is tee'd to the file alongside the terminal
+- Log files are rotated by date: `gateway-2026-03-26.log`
+- No automatic cleanup for v1; user manages disk space manually
+- Default: logging disabled (no `log_file` key)
+
+---
+
+## Terminal Tab Lifecycle
+
+**Profile terminals:**
+- Cannot be closed while the process is running (close button grayed out)
+- After process stops: terminal stays visible with output, user can close the tab
+
+**Free terminals:**
+- Close tab: if shell is running, show confirmation dialog "Shell is still running. Close anyway?"
+- If confirmed: send SIGTERM to shell, close tab after exit
+- If shell has already exited (user typed `exit`): close immediately, no prompt
+
+---
+
+## App Signing & Distribution
+
+**For local development (default):**
+- Build with Xcode, sign with personal team (automatic signing)
+- First launch: right-click > Open to bypass Gatekeeper
+- Sufficient for the primary use case (developer's own machine)
+
+**For distribution to other machines:**
+- Requires Apple Developer ID certificate ($99/year)
+- Sign with `codesign --deep --force --sign "Developer ID Application: ..."`
+- Notarize with `xcrun notarytool submit`
+- Without notarization: recipients must manually allow in System Settings > Privacy & Security
+
+**v1 scope:** local development signing only. Distribution signing documented but not automated.
+
+---
+
 ## Out of Scope (for v1)
 
 - Split pane / multi-terminal view in a single detail area
@@ -264,3 +361,5 @@ openclaw-daddy/
 - Profile groups or dependency ordering
 - Remote process management
 - Auto-update mechanism
+- Port conflict detection between profiles
+- Automated notarization pipeline
