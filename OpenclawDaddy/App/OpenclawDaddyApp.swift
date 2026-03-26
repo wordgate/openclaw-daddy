@@ -27,6 +27,11 @@ struct OpenclawDaddyApp: App {
                     let config = try configManager.load()
                     processManager = ProcessManager(restartDelay: config.global.restartDelay)
                     configManager.startWatching()
+                    if config.profiles.isEmpty {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                        }
+                    }
                 } catch {
                     print("Config load error: \(error)")
                 }
