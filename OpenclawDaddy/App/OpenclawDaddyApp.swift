@@ -27,7 +27,7 @@ struct OpenclawDaddyApp: App {
         .windowResizability(.contentSize)
 
         Settings {
-            Text("Settings placeholder")
+            SettingsView(configManager: configManager)
         }
 
         MenuBarExtra {
